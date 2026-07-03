@@ -1,7 +1,7 @@
 ---
-title: "DataAndMsgReturn Class Reference"
+title: "DataAndMsgReturn – Pydantic Return Model with msg and data"
 sidebarTitle: "DataAndMsgReturn"
-description: "DataAndMsgReturn extends BasicReturn with msg and data fields, providing a complete structured return type for Python functions that yield results or messages."
+description: "Extends BasicReturn with msg and data fields so functions can return a result payload and a status message alongside the standard ok and error properties."
 ---
 
 `DataAndMsgReturn` extends [`BasicReturn`](/api/basic-return) with two additional fields — `msg` for a human-readable operation message and `data` for any result payload. It is the most commonly used return type in BasicReturns, covering the full range of function outcomes: success with results, success with a status message, or failure with a detailed error.
@@ -21,11 +21,6 @@ from BasicReturns import BasicReturn
 class DataAndMsgReturn(BasicReturn):
     """Get a object return with basic properties (`ok`, `error`) and `msg` and `data` properties."""
 
-    # --- Inherited from BasicReturn ---
-    ok: Optional[bool] = True
-    error: Optional[Any] = None
-
-    # --- Own fields ---
     msg: Optional[str] = None
     data: Optional[Any] = None
 

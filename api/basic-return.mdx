@@ -1,7 +1,7 @@
 ---
-title: "BasicReturn Class Reference"
+title: "BasicReturn – Base Pydantic Return Model for Python Functions"
 sidebarTitle: "BasicReturn"
-description: "BasicReturn is the base Pydantic model for unified Python function returns. Documents the ok and error fields and the to_dict() serialization method."
+description: "A Pydantic BaseModel that gives every Python function a consistent ok flag and error field — the base return type of the BasicReturns library (v0.1.1)."
 ---
 
 `BasicReturn` is the foundation of the BasicReturns library. It is a Pydantic v2 `BaseModel` subclass that represents the outcome of any operation — success or failure — in a consistent, type-safe structure. Every function that uses BasicReturns returns at minimum an instance of `BasicReturn`, giving callers a predictable interface regardless of what the function does internally.
