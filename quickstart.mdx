@@ -1,47 +1,194 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with BasicReturns in Python"
+sidebarTitle: "Quickstart"
+description: "Install BasicReturns from PyPI and write your first standardized function return in under five minutes. Covers both BasicReturn and DataAndMsgReturn."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+By the end of this guide you will have BasicReturns installed, imported, and running in your project. You'll write a real function that uses `DataAndMsgReturn` to handle both success and failure paths, check the result with a clean `if result.ok` branch, and serialize the output to a plain dictionary using `to_dict()` — all in under five minutes.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+
+  <Step title="Install BasicReturns">
+    Install the package from PyPI using pip:
 
     ```bash
-    npm install your-package
+    pip install BasicReturns
     ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+
+    To pin to the current stable release (recommended for production):
 
     ```bash
-    your-cli init
+    pip install BasicReturns==0.1.1
     ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
 
-    ```bash
-    your-cli start
+    BasicReturns requires **Python >= 3.8** and will automatically install its only dependency, `pydantic==2.12.5`.
+  </Step>
+
+  <Step title="Import the models">
+    Both classes live at the top-level `BasicReturns` package. Import whichever ones you need:
+
+    ```python
+    from BasicReturns import BasicReturn, DataAndMsgReturn
+    ```
+
+    - Use `BasicReturn` for operations that don't return a data payload (writes, saves, deletes).
+    - Use `DataAndMsgReturn` for operations that compute or fetch something the caller will consume.
+  </Step>
+
+  <Step title="Write a function with DataAndMsgReturn">
+    The pattern is always the same: create a default response object, populate its fields inside a `try/except`, and return it. Here is the canonical example from the project docs:
+
+    ```python
+    from BasicReturns import DataAndMsgReturn
+
+    def divide_numbers(a: float, b: float) -> DataAndMsgReturn:
+        """Safely divide two numbers with unified return structure."""
+        response = DataAndMsgReturn()
+
+        try:
+            if b == 0:
+                raise ZeroDivisionError("Cannot divide by zero")
+            response.data = a / b
+            response.msg = "Division completed successfully"
+        except Exception as e:
+            response.ok = False
+            response.error = e
+            response.msg = "Division failed"
+
+        return response
+    ```
+
+    Notice what happens in each path:
+
+    - **Success** — `ok` stays at its default `True`, `data` receives the result, and `msg` records a human-readable summary.
+    - **Failure** — `ok` is explicitly set to `False`, `error` captures the exception, and `msg` describes what went wrong.
+  </Step>
+
+  <Step title="Handle the result">
+    Every caller uses the same `if result.ok` pattern regardless of which function returned the value. No more guessing whether to catch an exception or check for `None`:
+
+    ```python
+    result = divide_numbers(10, 2)
+
+    if result.ok:
+        print(f"{result.msg}: {result.data}")
+        # Division completed successfully: 5.0
+    else:
+        print(f"{result.msg}: {result.error}")
+        # Division failed: Cannot divide by zero
+
+    # Try a failing case:
+    bad_result = divide_numbers(10, 0)
+
+    if bad_result.ok:
+        print(bad_result.data)
+    else:
+        print(f"Error caught: {bad_result.error}")
+        # Error caught: Cannot divide by zero
     ```
   </Step>
+
+  <Step title="Serialize with to_dict()">
+    Both `BasicReturn` and `DataAndMsgReturn` expose a `to_dict()` method that returns a plain Python dictionary. This is useful for JSON responses, logging, or passing data across service boundaries:
+
+    ```python
+    result = divide_numbers(10, 2)
+
+    print(result.to_dict())
+    # {'ok': True, 'error': None, 'msg': 'Division completed successfully', 'data': 5.0}
+
+    bad_result = divide_numbers(10, 0)
+
+    print(bad_result.to_dict())
+    # {'ok': False, 'error': ZeroDivisionError('Cannot divide by zero'), 'msg': 'Division failed', 'data': {}}
+    ```
+
+    When `data` is `None` (the default on a failure path), `to_dict()` returns `{}` for the `data` key so downstream consumers always receive a consistent, non-null structure.
+  </Step>
+
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Because `ok` defaults to `True`, you only need to touch it on the **failure path**. On the success path, simply populate `data` and `msg` and return — `ok` is already correct. This keeps the happy path clean and the error path explicit.
 </Tip>
+
+## Both Classes Side by Side
+
+The two models follow the same pattern. Choose based on whether your function produces a data payload.
+
+<CodeGroup>
+
+```python BasicReturn Example
+from BasicReturns import BasicReturn
+
+def save_user(user_id: int, payload: dict) -> BasicReturn:
+    """Write operation — no data to return, only success/failure."""
+    response = BasicReturn()
+
+    try:
+        # Simulate a database write
+        db.users.update(user_id, payload)
+    except Exception as e:
+        response.ok = False
+        response.error = e
+
+    return response
+
+
+# Caller
+result = save_user(42, {"name": "Alice"})
+
+if result.ok:
+    print("User saved successfully")
+else:
+    print(f"Save failed: {result.error}")
+
+# Serialize
+print(result.to_dict())
+# {'ok': True, 'error': None}
+```
+
+```python DataAndMsgReturn Example
+from BasicReturns import DataAndMsgReturn
+
+def get_user(user_id: int) -> DataAndMsgReturn:
+    """Read operation — returns a data payload alongside status."""
+    response = DataAndMsgReturn()
+
+    try:
+        user = db.users.find(user_id)
+
+        if user is None:
+            response.ok = False
+            response.error = ValueError(f"User {user_id} not found")
+            response.msg = "User lookup failed"
+            return response
+
+        response.data = user
+        response.msg = f"User {user_id} retrieved successfully"
+    except Exception as e:
+        response.ok = False
+        response.error = e
+        response.msg = "Database error during user lookup"
+
+    return response
+
+
+# Caller
+result = get_user(42)
+
+if result.ok:
+    print(f"{result.msg}: {result.data}")
+else:
+    print(f"{result.msg}: {result.error}")
+
+# Serialize
+print(result.to_dict())
+# {'ok': True, 'error': None, 'msg': 'User 42 retrieved successfully', 'data': {...}}
+```
+
+</CodeGroup>
+
+<Note>
+  These examples use simple patterns to get you started quickly. The Guides section covers real-world scenarios in depth — including chaining multiple operations, propagating errors between functions, and integrating BasicReturns into API layers and file utilities.
+</Note>

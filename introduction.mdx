@@ -1,0 +1,139 @@
+---
+title: "BasicReturns: Unified Return Types for Python"
+sidebarTitle: "Introduction"
+description: "BasicReturns standardizes Python function return values with Pydantic-backed models. Learn how BasicReturn and DataAndMsgReturn replace ad-hoc patterns."
+---
+
+Python's flexibility is one of its greatest strengths — but it can also be a source of subtle inconsistencies. A function might return a raw value, a tuple, `None`, raise an exception, or return a boolean flag depending on its author and mood. Over time these ad-hoc patterns pile up: callers never know whether to check for `None`, catch an exception, or unpack a tuple. **BasicReturns** solves this at the root by giving every function a single, predictable return contract built on two Pydantic v2 models — `BasicReturn` and `DataAndMsgReturn` — so every response across your codebase shares the same shape, the same field names, and the same failure protocol.
+
+## The Two Classes
+
+BasicReturns exports exactly two models. Both are Pydantic `BaseModel` subclasses, which means they carry full type annotations, runtime validation, and a built-in `to_dict()` serialization method.
+
+<CardGroup cols={2}>
+  <Card title="BasicReturn" icon="circle-check" href="/api/basic-return">
+    The minimal return contract. Carries an `ok` flag and an `error` field.
+    Ideal for write operations, void-style procedures, or any operation where
+    the caller only needs to know whether it succeeded.
+  </Card>
+  <Card title="DataAndMsgReturn" icon="database" href="/api/data-and-msg-return">
+    Extends `BasicReturn` with a human-readable `msg` string and a `data`
+    payload. Use this whenever the caller needs to consume a result — fetched
+    records, computed values, parsed files, API responses, and so on.
+  </Card>
+</CardGroup>
+
+### `BasicReturn`
+
+```python
+from typing import Any, Optional
+from pydantic import BaseModel
+
+class BasicReturn(BaseModel):
+    ok: Optional[bool] = True
+    error: Optional[Any] = None
+```
+
+| Field   | Type            | Default | Purpose                                                        |
+|---------|-----------------|---------|----------------------------------------------------------------|
+| `ok`    | `Optional[bool]`| `True`  | `True` on success, `False` on failure — mirrors HTTP 2xx/4xx. |
+| `error` | `Optional[Any]` | `None`  | Holds the exception or error detail when `ok` is `False`.      |
+
+### `DataAndMsgReturn`
+
+```python
+class DataAndMsgReturn(BasicReturn):
+    msg: Optional[str] = None
+    data: Optional[Any] = None
+```
+
+Inherits `ok` and `error` from `BasicReturn` and adds:
+
+| Field  | Type            | Default | Purpose                                                          |
+|--------|-----------------|---------|------------------------------------------------------------------|
+| `msg`  | `Optional[str]` | `None`  | A human-readable message describing what happened.               |
+| `data` | `Optional[Any]` | `None`  | The return payload — any Python object, list, dict, model, etc. |
+
+## When to Use Each Class
+
+Use **`BasicReturn`** when your function performs a side effect (writing a file, saving to a database, sending an email) and the caller only needs a success/failure signal. There is no meaningful data to pass back — only whether the operation worked.
+
+Use **`DataAndMsgReturn`** when your function computes or fetches something the caller will consume. The `data` field carries the payload, `msg` gives a human-readable summary, and `ok`/`error` still handle the failure path — all in one object.
+
+## Without BasicReturns vs With BasicReturns
+
+The comparison below shows the same "divide two numbers" operation written both ways. Notice how the ad-hoc version forces callers to know implementation details (catch the exception? check for `None`? unpack the tuple?), while the BasicReturns version gives a single, uniform interface.
+
+```python
+# ── Without BasicReturns ────────────────────────────────────────────────────
+
+def divide_numbers_old(a: float, b: float):
+    """What does this return on failure? A tuple? None? Does it raise?"""
+    if b == 0:
+        return None          # caller must remember to check for None
+    return a / b             # or maybe it raises ZeroDivisionError?
+
+# The caller has no contract to rely on:
+result = divide_numbers_old(10, 2)
+if result is None:           # fragile — easy to forget
+    print("Something went wrong")
+else:
+    print(result)
+
+
+# ── With BasicReturns ───────────────────────────────────────────────────────
+
+from BasicReturns import DataAndMsgReturn
+
+def divide_numbers(a: float, b: float) -> DataAndMsgReturn:
+    """Always returns a DataAndMsgReturn — callers always know what to expect."""
+    response = DataAndMsgReturn()
+
+    try:
+        if b == 0:
+            raise ZeroDivisionError("Cannot divide by zero")
+        response.data = a / b
+        response.msg = "Division completed successfully"
+    except Exception as e:
+        response.ok = False
+        response.error = e
+        response.msg = "Division failed"
+
+    return response
+
+# The caller has a guaranteed contract:
+result = divide_numbers(10, 2)
+
+if result.ok:
+    print(f"{result.msg}: {result.data}")   # Division completed successfully: 5.0
+else:
+    print(f"{result.msg}: {result.error}")  # Division failed: Cannot divide by zero
+```
+
+## Key Benefits
+
+<Note>
+  **Consistent error handling** — every function speaks the same language. No more guessing whether to catch an exception, check for `None`, or unpack a tuple.
+
+  **No unhandled exceptions leaking to callers** — errors are captured in the `error` field and surfaced through `ok = False`, keeping control flow explicit and predictable.
+
+  **Full type safety** — both models carry complete type annotations and are fully compatible with **MyPy**, so your static analysis tooling can verify return types across your project.
+
+  **Pydantic v2 foundation** — built on `pydantic==2.12.5`, giving you runtime field validation, easy model composition, and `.model_dump()` interoperability alongside the built-in `to_dict()` method.
+
+  **Serialization included** — call `result.to_dict()` on any return object to get a plain Python `dict` ready for JSON encoding, API responses, or logging.
+
+  **Python 3.8+ support** — compatible with Python 3.8, 3.9, 3.10, 3.11, and 3.12.
+</Note>
+
+## Package Details
+
+| Property        | Value                                                          |
+|-----------------|----------------------------------------------------------------|
+| **PyPI name**   | `BasicReturns`                                                 |
+| **Version**     | `0.1.1`                                                        |
+| **License**     | MIT                                                            |
+| **Python**      | >= 3.8                                                         |
+| **Dependency**  | `pydantic==2.12.5`                                             |
+| **PyPI URL**    | [pypi.org/project/BasicReturns](https://pypi.org/project/BasicReturns/) |
+| **Source**      | [github.com/Dev2Forge/BasicReturns](https://github.com/Dev2Forge/BasicReturns) |

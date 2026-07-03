@@ -1,0 +1,194 @@
+---
+title: "Best Practices for Using BasicReturns"
+sidebarTitle: "Best Practices"
+description: "Patterns and conventions for using BasicReturn and DataAndMsgReturn consistently across a Python codebase for maximum readability and maintainability."
+---
+
+Adopting a uniform return convention is most effective when it is applied consistently. A single function that raises instead of returning, or that skips `msg` on success, creates a gap that erodes the pattern's value. The practices below help teams establish a codebase-wide standard that makes every function predictable — whether you are reading it for the first time or debugging it at 2 AM.
+
+<Accordion title="Always initialize the response at the top">
+  Declare `response = DataAndMsgReturn()` (or `response = BasicReturn()`) as the very first line of the function body, before any logic, guards, or branching. This ensures there is always a valid return value no matter how control flow exits the function, and it makes the intended return type immediately visible to anyone reading the code.
+
+  ```python
+  from BasicReturns import DataAndMsgReturn
+
+  def process_order(order_id: int) -> DataAndMsgReturn:
+      response = DataAndMsgReturn()  # initialize first — always
+
+      try:
+          order = fetch_order(order_id)
+          response.data = order
+          response.msg = f"Order {order_id} processed successfully"
+      except Exception as e:
+          response.ok = False
+          response.error = e
+          response.msg = f"Failed to process order {order_id}"
+
+      return response
+  ```
+
+  Avoid initializing the response inside an `if` branch or late in the function body — it makes it easy to accidentally return an uninitialized value on some code paths.
+</Accordion>
+
+<Accordion title="Use BasicReturn for void-style operations">
+  If a function performs an action but has no meaningful payload to return — writing a file, deleting a record, sending a notification — use `BasicReturn` rather than `DataAndMsgReturn`. This keeps the function signature honest: it tells callers up front that there is no data to inspect, only a success or failure signal.
+
+  ```python
+  import json
+  from BasicReturns import BasicReturn
+
+  def delete_user(user_id: int) -> BasicReturn:
+      """Remove a user record. Returns ok/error only."""
+      response = BasicReturn()
+
+      try:
+          database.delete("users", user_id)
+      except Exception as e:
+          response.ok = False
+          response.error = e
+
+      return response
+  ```
+
+  Returning a `DataAndMsgReturn` with an empty `data` field from a write-only function is not wrong, but it misleads readers into expecting a payload that never arrives. Match the class to the intent.
+</Accordion>
+
+<Accordion title="Set msg on both success and failure">
+  The `msg` field is not only for error messages. Setting a clear, descriptive message on the success path — `"User created successfully"`, `"Config loaded and validated"` — makes logs and debug output meaningful without any extra tooling. A function that only sets `msg` on failure gives you half the picture.
+
+  ```python
+  from BasicReturns import DataAndMsgReturn
+
+  def create_user(name: str, email: str) -> DataAndMsgReturn:
+      response = DataAndMsgReturn()
+
+      try:
+          user = database.insert("users", {"name": name, "email": email})
+          response.data = user
+          response.msg = f"User '{name}' created with id {user['id']}"  # set on success
+      except Exception as e:
+          response.ok = False
+          response.error = e
+          response.msg = f"Failed to create user '{name}'"              # set on failure
+
+      return response
+  ```
+
+  When `msg` is consistently populated, `str(result)` and structured logging give you useful audit trails at no extra cost.
+</Accordion>
+
+<Accordion title="Never raise in a return-typed function">
+  A function that declares `-> DataAndMsgReturn` or `-> BasicReturn` as its return type has made a contract: it will always return that type, and it will never raise. Wrap the entire function body in `try/except Exception` and set `ok = False` if anything goes wrong.
+
+  ```python
+  from BasicReturns import DataAndMsgReturn
+
+  def parse_config(raw: str) -> DataAndMsgReturn:
+      response = DataAndMsgReturn()
+
+      try:
+          import json
+          response.data = json.loads(raw)
+          response.msg = "Configuration parsed successfully"
+      except json.JSONDecodeError as e:
+          response.ok = False
+          response.error = e
+          response.msg = "Configuration string is not valid JSON"
+      except Exception as e:
+          response.ok = False
+          response.error = e
+          response.msg = "Unexpected error while parsing configuration"
+
+      return response
+  ```
+
+  If a caller receives a `DataAndMsgReturn`, they should never need a `try/except` around the call — they rely on `result.ok` instead.
+</Accordion>
+
+<Accordion title="Propagate errors — don't swallow them">
+  When chaining operations, always forward the original exception object from the inner result to the outer one. Do not replace `result.error` with a plain string, and do not discard it by creating a fresh exception. The original exception carries the full traceback, the original message, and any metadata attached by the inner function.
+
+  ```python
+  from BasicReturns import DataAndMsgReturn
+
+  def load_user_config(user_id: int) -> DataAndMsgReturn:
+      response = DataAndMsgReturn()
+
+      file_result = read_file(f"configs/{user_id}.json")
+      if not file_result.ok:
+          # ✅ Preserve the original exception
+          return DataAndMsgReturn(
+              ok=False,
+              error=file_result.error,   # keep the original exception
+              msg=f"Could not load config for user {user_id}: {file_result.msg}"
+          )
+
+          # ❌ Don't do this — swallows the original error context
+          # response.ok = False
+          # response.error = "file read failed"
+          # return response
+
+      response.data = file_result.data
+      response.msg = f"Config loaded for user {user_id}"
+      return response
+  ```
+
+  Swallowing the original error makes post-mortem debugging significantly harder, especially across service boundaries or in production logs.
+</Accordion>
+
+<Accordion title="Use to_dict() at the boundary">
+  Call `to_dict()` only at the outermost layer of your application — an API route handler, a CLI output formatter, a message queue publisher. Deep inside business logic, pass `DataAndMsgReturn` or `BasicReturn` objects directly, keeping the Pydantic model intact and all fields accessible as attributes.
+
+  ```python
+  from BasicReturns import DataAndMsgReturn
+
+  # ✅ Business logic — pass the model, not a dict
+  def orchestrate_pipeline() -> DataAndMsgReturn:
+      step1 = ingest_data()
+      if not step1.ok:
+          return step1          # still a DataAndMsgReturn instance
+
+      step2 = transform(step1.data)
+      if not step2.ok:
+          return step2
+
+      return step2
+
+
+  # ✅ Boundary layer — serialize once, at the edge
+  def pipeline_endpoint() -> dict:
+      result = orchestrate_pipeline()
+      return result.to_dict()   # serialize here, not inside orchestrate_pipeline
+  ```
+
+  Serializing early loses attribute access (`result.data`, `result.msg`) and prevents chaining — keep the model as a model until you need a dictionary.
+</Accordion>
+
+<Accordion title="Type-annotate all return types">
+  Always declare `-> DataAndMsgReturn` or `-> BasicReturn` in your function signatures. Type annotations make the intended contract visible at a glance, enable IDE auto-completion for `.ok`, `.data`, `.error`, and `.msg`, and allow MyPy to catch mismatches before they reach production.
+
+  ```python
+  from BasicReturns import BasicReturn, DataAndMsgReturn
+
+  # ✅ Annotated — IDE and MyPy can validate callers and the function body
+  def fetch_product(product_id: int) -> DataAndMsgReturn:
+      response = DataAndMsgReturn()
+      # ...
+      return response
+
+  def archive_record(record_id: int) -> BasicReturn:
+      response = BasicReturn()
+      # ...
+      return response
+
+  # ❌ Unannotated — callers have no idea what they're receiving
+  def fetch_product(product_id: int):
+      ...
+  ```
+
+  In a team setting, annotated return types act as living documentation — they communicate intent to every developer who reads or calls the function.
+</Accordion>
+
+<Note>
+  BasicReturns is fully compatible with MyPy. Because `BasicReturn` and `DataAndMsgReturn` are Pydantic `BaseModel` subclasses with typed fields, annotating your functions and running `mypy` will catch type mismatches — such as returning a raw `dict` from a `-> DataAndMsgReturn` function, or accessing `.data` on a `BasicReturn` — before they reach your test suite or production environment.
+</Note>

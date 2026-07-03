@@ -1,0 +1,165 @@
+---
+title: "Chaining Dependent Operations with BasicReturns"
+sidebarTitle: "Chaining Operations"
+description: "Learn how to propagate errors through multi-step workflows by chaining BasicReturns function calls without nested try/except blocks."
+---
+
+In multi-step workflows — read a file, then parse it, then validate its contents — if any step fails you want to stop immediately and propagate the failure upward, not continue into the next step with bad data. BasicReturns makes this trivial. Because every function returns the same structure, you can check `result.ok` after each call and return the failed result directly, keeping the error context intact without any nested `try/except` blocks or re-raising exceptions.
+
+## Early Return Pattern
+
+The simplest chaining technique is the early return: call a function, and if it did not succeed, return its result immediately. The caller receives the same `DataAndMsgReturn` that the inner function produced — including its `error`, `msg`, and `ok = False` — without any wrapping or translation.
+
+```python
+import json
+from BasicReturns import DataAndMsgReturn
+
+def read_file(filename: str) -> DataAndMsgReturn:
+    """Read raw file content."""
+    response = DataAndMsgReturn()
+
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            response.data = file.read()
+            response.msg = f"Successfully read file: {filename}"
+    except Exception as e:
+        response.ok = False
+        response.error = e
+        response.msg = f"Error reading file: {filename}"
+
+    return response
+
+
+def read_json(filename: str) -> DataAndMsgReturn:
+    """Read and parse a JSON file, propagating any file-read errors."""
+    response = DataAndMsgReturn()
+    file_result = read_file(filename)
+
+    if not file_result.ok:
+        return file_result  # bubble the failure straight up
+
+    try:
+        response.data = json.loads(file_result.data)
+        response.msg = f"Successfully parsed JSON from: {filename}"
+    except json.JSONDecodeError as e:
+        response.ok = False
+        response.error = e
+        response.msg = f"Invalid JSON format in file: {filename}"
+
+    return response
+```
+
+`read_json` never needs to know *why* `read_file` failed — it just passes the result along. The caller of `read_json` gets back either a valid parsed payload or a fully described failure, regardless of which layer it originated in.
+
+## Constructing a New Return from a Failed One
+
+Sometimes you need to add context at the current layer rather than passing the original result unchanged. For example, a higher-level function may want to describe *what it was trying to do* rather than surface the low-level technical message. In that case, build a new `DataAndMsgReturn` that preserves the original exception while replacing the message:
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def load_settings(path: str) -> DataAndMsgReturn:
+    """Load application settings, adding context on failure."""
+    result = read_json(path)
+
+    if not result.ok:
+        return DataAndMsgReturn(
+            ok=False,
+            error=result.error,          # keep the original exception
+            msg=f"Failed to load settings from '{path}': {result.msg}"
+        )
+
+    return result
+```
+
+The key rule: always forward `result.error` — never replace the exception object with a plain string. Keeping the original exception preserves the full traceback for logging and debugging.
+
+## Full Chain Example
+
+Here is a complete three-step chain that reads a JSON configuration file and then validates its contents, taken directly from the BasicReturns README:
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def validate_config(config: dict) -> DataAndMsgReturn:
+    """Validate required fields in a configuration dictionary."""
+    response = DataAndMsgReturn()
+
+    try:
+        required_keys = {"host", "port", "database"}
+        missing = required_keys - config.keys()
+        if missing:
+            raise ValueError(f"Missing required config keys: {missing}")
+        response.data = config
+        response.msg = "Configuration is valid"
+    except Exception as e:
+        response.ok = False
+        response.error = e
+        response.msg = "Configuration validation failed"
+
+    return response
+
+
+def load_and_validate_config() -> DataAndMsgReturn:
+    """Load config.json and validate its structure."""
+
+    # Step 1 — read and parse the file
+    config_result = read_json("config.json")
+    if not config_result.ok:
+        return config_result  # propagate file/parse error as-is
+
+    # Step 2 — validate the parsed data
+    validation_result = validate_config(config_result.data)
+    if not validation_result.ok:
+        return DataAndMsgReturn(
+            ok=False,
+            error=validation_result.error,
+            msg=f"Configuration validation failed: {validation_result.msg}"
+        )
+
+    # All steps succeeded
+    return DataAndMsgReturn(
+        data=config_result.data,
+        msg="Configuration loaded and validated successfully"
+    )
+```
+
+Each step is isolated: `read_json` knows nothing about validation, and `validate_config` knows nothing about files. `load_and_validate_config` composes them, checks the result of each, and either short-circuits with the error or assembles the final success return.
+
+<Info>
+  This pattern is structurally identical to Rust's `?` operator and to monadic `bind` (the `>>=` operator in Haskell). Each step only executes if the previous one succeeded, and errors propagate automatically through the chain without boilerplate. BasicReturns brings that discipline to Python in an explicit, readable form.
+</Info>
+
+## Propagating to API Responses
+
+Chained results naturally serialize at the boundary. Call `to_dict()` once, at the outermost layer, and the full context — including the original error and every message accumulated along the chain — is ready for a JSON response or log entry:
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def handle_startup_request() -> dict:
+    """Load config and return a serializable result for the API layer."""
+    result = load_and_validate_config()
+
+    # to_dict() returns {"ok": ..., "error": ..., "msg": ..., "data": ...}
+    return result.to_dict()
+
+
+# Example output on failure:
+# {
+#   "ok": False,
+#   "error": FileNotFoundError("config.json not found"),
+#   "msg": "Error reading file: config.json",
+#   "data": {}
+# }
+
+# Example output on success:
+# {
+#   "ok": True,
+#   "error": None,
+#   "msg": "Configuration loaded and validated successfully",
+#   "data": {"host": "localhost", "port": 5432, "database": "mydb"}
+# }
+```
+
+Because the structure is always the same, the API layer does not need to branch on the result type — it calls `to_dict()` unconditionally and lets the `ok` field carry the signal to the client.

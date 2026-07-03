@@ -1,0 +1,153 @@
+---
+title: "BasicReturn Class Reference"
+sidebarTitle: "BasicReturn"
+description: "BasicReturn is the base Pydantic model for unified Python function returns. Documents the ok and error fields and the to_dict() serialization method."
+---
+
+`BasicReturn` is the foundation of the BasicReturns library. It is a Pydantic v2 `BaseModel` subclass that represents the outcome of any operation — success or failure — in a consistent, type-safe structure. Every function that uses BasicReturns returns at minimum an instance of `BasicReturn`, giving callers a predictable interface regardless of what the function does internally.
+
+## Import
+
+```python
+from BasicReturns import BasicReturn
+```
+
+## Class Definition
+
+```python
+from typing import Any, Optional
+from pydantic import BaseModel
+
+class BasicReturn(BaseModel):
+    """Have a basic return model, contains `ok` and `error` properties."""
+    ok: Optional[bool] = True
+    error: Optional[Any] = None
+
+    def __str__(self) -> str:
+        return f'OK: {self.ok}\nError: {self.error}'
+
+    def to_dict(self) -> dict:
+        """Get a self representation as dictionary"""
+        return {"ok": self.ok, "error": self.error}
+```
+
+## Fields
+
+<ParamField body="ok" type="Optional[bool]" default="True">
+  `True` when the operation succeeded; set to `False` on failure. Mirrors the
+  semantics of an HTTP success response — a truthy value signals the caller that
+  the operation completed without error.
+</ParamField>
+
+<ParamField body="error" type="Optional[Any]" default="None">
+  Holds the exception or error object when `ok` is `False`. Remains `None` on
+  success. Accepts any Python value — an `Exception` subclass, a string
+  message, or any custom error object.
+</ParamField>
+
+## Methods
+
+### `to_dict()`
+
+Returns a plain Python dictionary representation of the instance. This is
+useful at serialization boundaries — for example, before passing the return
+value to `json.dumps()` or a web framework response helper.
+
+**Return type:** `dict`
+
+<Expandable title="Returned keys">
+  <ResponseField name="ok" type="bool">
+    The success flag. `True` if the operation succeeded, `False` otherwise.
+  </ResponseField>
+
+  <ResponseField name="error" type="Any | None">
+    The error object captured during the operation, or `None` when the
+    operation was successful.
+  </ResponseField>
+</Expandable>
+
+```python
+response = BasicReturn()
+print(response.to_dict())  # {'ok': True, 'error': None}
+
+failed = BasicReturn(ok=False, error=ValueError("something went wrong"))
+print(failed.to_dict())  # {'ok': False, 'error': ValueError('something went wrong')}
+```
+
+---
+
+### `__str__()`
+
+Returns a human-readable, multi-line string representation of the instance.
+Handy for logging and debugging.
+
+**Return type:** `str`  
+**Format:** `OK: {ok}\nError: {error}`
+
+```python
+response = BasicReturn(ok=False, error=FileNotFoundError("config.yaml not found"))
+print(str(response))
+# OK: False
+# Error: [Errno 2] No such file or directory: 'config.yaml not found'
+```
+
+## Usage Example
+
+The canonical pattern is to wrap the body of a function in a `try/except` block
+and return a `BasicReturn` in both branches. Callers can then check `result.ok`
+before proceeding.
+
+```python
+from BasicReturns import BasicReturn
+
+def save_config(path: str, content: str) -> BasicReturn:
+    """Write content to a file and return a BasicReturn indicating success or failure."""
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return BasicReturn()  # ok=True, error=None by default
+    except Exception as e:
+        return BasicReturn(ok=False, error=e)
+
+
+# --- Caller ---
+result = save_config("/etc/myapp/config.yaml", "debug: true")
+
+if result.ok:
+    print("Config saved successfully.")
+else:
+    print(f"Failed to save config: {result.error}")
+```
+
+## When to Use `BasicReturn` vs `DataAndMsgReturn`
+
+| Scenario | Recommended class |
+|---|---|
+| Write, delete, send, or any fire-and-forget operation | `BasicReturn` |
+| Operation that returns a result payload or a message | `DataAndMsgReturn` |
+| Lightweight success/failure signal with no extra context | `BasicReturn` |
+| API handler that needs structured JSON with `msg` and `data` | `DataAndMsgReturn` |
+
+Use `BasicReturn` when the operation's only meaningful outcome is whether it
+**succeeded or failed** — there is no data to return to the caller. If you find
+yourself stuffing results into the `error` field on success, that is a clear
+signal to switch to `DataAndMsgReturn` instead.
+
+<Note>
+  `BasicReturn` extends Pydantic's `BaseModel`, so you can construct it with
+  keyword arguments just like any other Pydantic model:
+
+  ```python
+  BasicReturn(ok=False, error=ValueError("oops"))
+  ```
+
+  Pydantic will validate the field types at construction time, making it safe
+  to use in strictly-typed codebases.
+</Note>
+
+<Tip>
+  Need to return data or a human-readable message alongside `ok` and `error`?
+  See the [DataAndMsgReturn](/api/data-and-msg-return) reference — it extends
+  `BasicReturn` with `msg` and `data` fields without changing any existing
+  behaviour.
+</Tip>

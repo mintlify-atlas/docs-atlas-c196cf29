@@ -1,0 +1,60 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "BasicReturns",
+  "projectDescription": "A Python PyPI package that standardizes function return values across Python applications to enhance code consistency, readability, and maintainability.",
+  "theme": "luma",
+  "primaryColor": "#2673d9",
+  "lightColor": "#54b8e9",
+  "darkColor": "#fc8404",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/error-handling",
+              "guides/chaining-operations",
+              "guides/api-integration",
+              "guides/best-practices"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Classes",
+            "pages": [
+              "api/basic-return",
+              "api/data-and-msg-return"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Unified return types (BasicReturn, DataAndMsgReturn) for consistent function signatures",
+    "Built-in success/failure state via the `ok` boolean field",
+    "Structured error capture with the `error` field for exception propagation",
+    "Human-readable operation messages via the `msg` field",
+    "Arbitrary data payload support via the `data` field",
+    "Full Pydantic v2 integration with type safety and MyPy compatibility",
+    "Built-in `to_dict()` serialization for JSON/API responses",
+    "Python 3.8+ support across all major versions"
+  ],
+  "publicApiSurface": [
+    "BasicReturn (ok: bool, error: Any, to_dict() -> dict)",
+    "DataAndMsgReturn(ok: bool, error: Any, msg: str, data: Any, to_dict() -> dict)"
+  ]
+}

@@ -1,0 +1,123 @@
+---
+title: "Integrating BasicReturns with HTTP APIs and Frameworks"
+sidebarTitle: "API Integration"
+description: "Use DataAndMsgReturn to wrap HTTP client calls and serialize structured responses for REST APIs, Flask, FastAPI, and other Python frameworks."
+---
+
+BasicReturns fits naturally in any application layer that calls external APIs or needs to return structured responses. The `to_dict()` method produces a plain dictionary with a consistent shape — `ok`, `error`, `msg`, `data` — that can be handed directly to a JSON serializer, a framework response object, or a message queue. There is no translation layer to write, and callers always know what to expect.
+
+## Wrapping an HTTP Client
+
+The `fetch_api_data` pattern from the BasicReturns README shows how to wrap a `requests` call. Initialize the response, attempt the request inside `try`, and catch `requests.exceptions.RequestException` on failure:
+
+```python
+import requests
+from BasicReturns import DataAndMsgReturn
+
+def fetch_api_data(url: str) -> DataAndMsgReturn:
+    """Fetch JSON data from an external API endpoint."""
+    response = DataAndMsgReturn()
+
+    try:
+        api_response = requests.get(url, timeout=10)
+        api_response.raise_for_status()  # raises HTTPError on 4xx/5xx
+
+        response.data = api_response.json()
+        response.msg = f"Successfully fetched data from {url}"
+    except requests.exceptions.RequestException as e:
+        response.ok = False
+        response.error = e
+        response.msg = f"API request failed: {url}"
+
+    return response
+```
+
+`raise_for_status()` converts HTTP error codes into exceptions, which are then caught and stored in `response.error`. The caller never needs to inspect status codes — `result.ok` is the single signal.
+
+## Serializing for API Responses
+
+Call `result.to_dict()` to get a plain dictionary ready for serialization. The structure is always the same regardless of success or failure:
+
+```python
+result = fetch_api_data("https://api.example.com/users/42")
+
+payload = result.to_dict()
+# Success:
+# {
+#   "ok": True,
+#   "error": None,
+#   "msg": "Successfully fetched data from https://api.example.com/users/42",
+#   "data": {"id": 42, "name": "Alice", "email": "alice@example.com"}
+# }
+
+# Failure:
+# {
+#   "ok": False,
+#   "error": ConnectionError("..."),
+#   "msg": "API request failed: https://api.example.com/users/42",
+#   "data": {}
+# }
+```
+
+The consistent shape means your frontend or downstream consumers can always read `ok` first and branch from there — no need to special-case error response formats.
+
+<Note>
+  The `data` field in `to_dict()` returns `{}` (an empty dictionary) when `data` is `None`. This keeps API responses well-formed even on partial success or failure — JSON clients receive a valid object for `data` rather than `null`, which avoids null-check errors in many frontend frameworks.
+</Note>
+
+## Flask Example
+
+In a Flask route, call the service function, then pass `result.to_dict()` directly to `jsonify`. The HTTP status code can be derived from `result.ok`:
+
+```python
+from flask import Flask, jsonify
+from BasicReturns import DataAndMsgReturn
+
+app = Flask(__name__)
+
+def get_user_profile(user_id: int) -> DataAndMsgReturn:
+    """Fetch a user profile from an external service."""
+    return fetch_api_data(f"https://api.example.com/users/{user_id}")
+
+
+@app.route("/users/<int:user_id>")
+def user_profile(user_id: int):
+    result = get_user_profile(user_id)
+
+    status_code = 200 if result.ok else 502
+    return jsonify(result.to_dict()), status_code
+```
+
+The route handler stays thin: it delegates to the service layer, converts the result to a dictionary, and maps `ok` to an HTTP status code. No `try/except` blocks appear in the handler at all.
+
+## FastAPI Example
+
+FastAPI works the same way. Because `DataAndMsgReturn` is a Pydantic `BaseModel`, you can return the model instance directly from an endpoint and FastAPI will serialize it automatically — or call `to_dict()` if you prefer an explicit dictionary response:
+
+```python
+from fastapi import FastAPI
+from BasicReturns import DataAndMsgReturn
+
+app = FastAPI()
+
+def get_article(article_id: int) -> DataAndMsgReturn:
+    """Fetch an article from an external CMS API."""
+    return fetch_api_data(f"https://cms.example.com/articles/{article_id}")
+
+
+@app.get("/articles/{article_id}")
+def read_article(article_id: int) -> dict:
+    result = get_article(article_id)
+
+    # Option 1 — return the Pydantic model directly (FastAPI serializes it)
+    # return result
+
+    # Option 2 — return an explicit dict via to_dict()
+    return result.to_dict()
+```
+
+Because `DataAndMsgReturn` extends Pydantic's `BaseModel`, FastAPI can generate accurate OpenAPI schema from it automatically when you use Option 1, giving you free documentation for the response shape.
+
+<Tip>
+  Set `response.msg` to a user-facing message and store the raw exception in `response.error`. Log `response.error` server-side for debugging, but return only `response.msg` to the client in your response body. This keeps sensitive implementation details — file paths, stack frames, internal service names — out of public API responses while preserving them where they are actually useful.
+</Tip>

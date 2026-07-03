@@ -1,0 +1,116 @@
+---
+title: "Consistent Error Handling with BasicReturns"
+sidebarTitle: "Error Handling"
+description: "Replace scattered exceptions and inconsistent return types with BasicReturn and DataAndMsgReturn for predictable, readable error handling in Python."
+---
+
+Instead of letting exceptions bubble up unpredictably through call stacks, BasicReturns gives every function a uniform contract: errors are captured in the `error` field rather than raised, and every caller checks `result.ok` to determine success or failure. This means no more guessing which functions might throw, no inconsistent return shapes, and a single readable pattern that works from utility helpers all the way up to API handlers.
+
+## The Pattern
+
+The canonical BasicReturns pattern is straightforward: initialize a `DataAndMsgReturn` at the top of the function, wrap your logic in a `try/except`, and always `return response` at the end. Here is a complete example using file reading:
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def read_file(filename: str) -> DataAndMsgReturn:
+    """Read file content with a unified return structure."""
+    response = DataAndMsgReturn()
+
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            response.data = file.read()
+            response.msg = f"Successfully read file: {filename}"
+    except Exception as e:
+        response.ok = False
+        response.error = e
+        response.msg = f"Error reading file: {filename}"
+
+    return response
+```
+
+The same structure applies to any operation — a database query, an API call, a computation — because the shape of the return value never changes.
+
+## Setting ok = False
+
+When something goes wrong, you set three fields on the response object before returning it. Set `response.ok = False` to signal failure, assign the caught exception to `response.error` so the full traceback and context are preserved, and write a human-readable explanation to `response.msg`:
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def divide_numbers(a: float, b: float) -> DataAndMsgReturn:
+    """Safely divide two numbers."""
+    response = DataAndMsgReturn()
+
+    try:
+        if b == 0:
+            raise ZeroDivisionError("Cannot divide by zero")
+        response.data = a / b
+        response.msg = "Division completed successfully"
+    except Exception as e:
+        response.ok = False          # mark as failed
+        response.error = e           # preserve the original exception
+        response.msg = "Division failed"
+
+    return response
+```
+
+`ok` defaults to `True`, so you only need to set it explicitly on the failure path. On success, simply populate `data` and `msg` and return.
+
+## Checking the Result
+
+Every caller uses the same `if result.ok` guard. On failure, `result.error` contains the original exception (with its full traceback if needed) and `result.msg` contains the human-readable summary:
+
+```python
+result = divide_numbers(10, 0)
+
+if result.ok:
+    print(f"Result: {result.data}")
+    print(f"Message: {result.msg}")
+else:
+    print(f"Something went wrong: {result.msg}")
+    print(f"Error details: {result.error}")
+    # result.error is the original ZeroDivisionError instance
+```
+
+Because every function in your codebase follows the same contract, callers never need to know the internals of what they're calling — the shape is always predictable.
+
+## Using BasicReturn for Write Operations
+
+When a function performs an action but has no meaningful payload to return — writing a file, sending an email, triggering a job — use `BasicReturn` instead of `DataAndMsgReturn`. This keeps your function signatures honest: it signals to readers that success/failure is all you can expect back.
+
+```python
+import json
+from BasicReturns import BasicReturn
+
+def write_json(filename: str, data: dict) -> BasicReturn:
+    """Write a dictionary to a JSON file."""
+    response = BasicReturn()
+
+    try:
+        with open(filename, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=2, ensure_ascii=False)
+    except Exception as e:
+        response.ok = False
+        response.error = e
+
+    return response
+
+
+save_result = write_json("output.json", {"status": "ready"})
+
+if save_result.ok:
+    print("File saved successfully.")
+else:
+    print(f"Save failed: {save_result.error}")
+```
+
+`BasicReturn` provides exactly `ok` and `error` — nothing more. Reserve `DataAndMsgReturn` for functions that produce a result worth inspecting.
+
+<Warning>
+  Never raise exceptions from functions that return a `BasicReturn` or `DataAndMsgReturn` variant. Always capture exceptions inside the function and set `ok = False` with the exception in `error`. Raising bypasses the contract entirely and forces callers to wrap your function in their own `try/except`, defeating the purpose of the library.
+</Warning>
+
+<Tip>
+  Call `str(result)` to get a formatted debug string at any point. The `__str__` method on `DataAndMsgReturn` prints all four fields — `ok`, `error`, `msg`, and `data` — on separate lines, making it useful for quick inspection in logs or the REPL.
+</Tip>

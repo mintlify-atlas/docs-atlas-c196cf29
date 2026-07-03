@@ -1,0 +1,224 @@
+---
+title: "DataAndMsgReturn Class Reference"
+sidebarTitle: "DataAndMsgReturn"
+description: "DataAndMsgReturn extends BasicReturn with msg and data fields, providing a complete structured return type for Python functions that yield results or messages."
+---
+
+`DataAndMsgReturn` extends [`BasicReturn`](/api/basic-return) with two additional fields — `msg` for a human-readable operation message and `data` for any result payload. It is the most commonly used return type in BasicReturns, covering the full range of function outcomes: success with results, success with a status message, or failure with a detailed error.
+
+## Import
+
+```python
+from BasicReturns import DataAndMsgReturn
+```
+
+## Class Definition
+
+```python
+from typing import Any, Optional
+from BasicReturns import BasicReturn
+
+class DataAndMsgReturn(BasicReturn):
+    """Get a object return with basic properties (`ok`, `error`) and `msg` and `data` properties."""
+
+    # --- Inherited from BasicReturn ---
+    ok: Optional[bool] = True
+    error: Optional[Any] = None
+
+    # --- Own fields ---
+    msg: Optional[str] = None
+    data: Optional[Any] = None
+
+    def __str__(self) -> str:
+        return f'{super().__str__()}\nMessage: {self.msg}\nData: {self.data}\nError: {self.error}'
+
+    def to_dict(self) -> dict:
+        return {**super().to_dict(), "msg": self.msg, "data": self.data if self.data else {}}
+```
+
+## Fields
+
+<ParamField body="ok" type="Optional[bool]" default="True">
+  Inherited from `BasicReturn`. `True` on success, `False` on failure. Set this
+  to `False` in your `except` block so callers can check `result.ok` before
+  accessing `result.data`.
+</ParamField>
+
+<ParamField body="error" type="Optional[Any]" default="None">
+  Inherited from `BasicReturn`. The exception or error object captured on
+  failure. Remains `None` when `ok` is `True`. Accepts any Python value —
+  an `Exception` subclass, an error code string, or a custom error model.
+</ParamField>
+
+<ParamField body="msg" type="Optional[str]" default="None">
+  A human-readable message describing the outcome of the operation. Set on both
+  success and failure paths. Useful for logging, toast notifications, or API
+  response summaries — e.g. `"User created successfully"` or
+  `"Email address already in use"`.
+</ParamField>
+
+<ParamField body="data" type="Optional[Any]" default="None">
+  The result payload. Can be any Python object — a `dict`, `list`, dataclass,
+  Pydantic model, or primitive value. Typically set only on success; left as
+  `None` on failure. When serialized via `to_dict()`, a `None` value is
+  converted to an empty dict `{}` automatically.
+</ParamField>
+
+## Methods
+
+### `to_dict()`
+
+Returns a plain Python dictionary that merges the parent `BasicReturn.to_dict()`
+output with the `msg` and `data` fields. If `data` is `None` it is serialized
+as `{}`, making the result immediately safe to pass to `json.dumps()` without a
+`TypeError` on `None`.
+
+**Return type:** `dict`
+
+<Expandable title="Returned keys">
+  <ResponseField name="ok" type="bool">
+    The success flag. `True` if the operation succeeded, `False` otherwise.
+  </ResponseField>
+
+  <ResponseField name="error" type="Any | None">
+    The error object captured during the operation, or `None` on success.
+  </ResponseField>
+
+  <ResponseField name="msg" type="str | None">
+    The human-readable operation message, or `None` if not set.
+  </ResponseField>
+
+  <ResponseField name="data" type="Any | {}">
+    The result payload. Returns an empty dict `{}` when `data` was not set or
+    was explicitly passed as `None`.
+  </ResponseField>
+</Expandable>
+
+```python
+response = DataAndMsgReturn(data={"id": 1}, msg="Found", ok=True)
+print(response.to_dict())
+# {'ok': True, 'error': None, 'msg': 'Found', 'data': {'id': 1}}
+
+empty_data = DataAndMsgReturn(ok=True, msg="Done")
+print(empty_data.to_dict())
+# {'ok': True, 'error': None, 'msg': 'Done', 'data': {}}
+```
+
+---
+
+### `__str__()`
+
+Returns a human-readable, multi-line string that prints all four fields.
+Extends the parent `BasicReturn.__str__()` output with the `msg` and `data`
+lines.
+
+**Return type:** `str`  
+**Format:**
+```
+OK: {ok}
+Error: {error}
+Message: {msg}
+Data: {data}
+Error: {error}
+```
+
+```python
+response = DataAndMsgReturn(ok=True, msg="User fetched", data={"id": 42, "name": "Alice"})
+print(str(response))
+# OK: True
+# Error: None
+# Message: User fetched
+# Data: {'id': 42, 'name': 'Alice'}
+# Error: None
+```
+
+## Complete Usage Example
+
+The `divide_numbers` function below demonstrates the full BasicReturns pattern:
+a `try/except` block populates `data` and `msg` on success, and `error` and
+`msg` on failure. The caller checks `result.ok` before using `result.data`.
+
+```python
+from BasicReturns import DataAndMsgReturn
+
+def divide_numbers(a: float, b: float) -> DataAndMsgReturn:
+    """Divide two numbers and return the result wrapped in a DataAndMsgReturn."""
+    try:
+        result = a / b
+        return DataAndMsgReturn(
+            ok=True,
+            data={"result": result},
+            msg=f"{a} / {b} = {result}",
+        )
+    except ZeroDivisionError as e:
+        return DataAndMsgReturn(
+            ok=False,
+            error=e,
+            msg="Division by zero is not allowed.",
+        )
+    except Exception as e:
+        return DataAndMsgReturn(
+            ok=False,
+            error=e,
+            msg="An unexpected error occurred.",
+        )
+
+
+# --- Caller ---
+response = divide_numbers(10, 2)
+
+if response.ok:
+    print(response.msg)           # 10.0 / 2.0 = 5.0
+    print(response.data)          # {'result': 5.0}
+else:
+    print(f"Error: {response.error}")
+    print(f"Message: {response.msg}")
+
+# --- Failure path ---
+bad = divide_numbers(5, 0)
+print(bad.ok)     # False
+print(bad.msg)    # Division by zero is not allowed.
+print(bad.error)  # division by zero
+```
+
+## Inheritance
+
+`DataAndMsgReturn` sits at the end of a three-level inheritance chain:
+
+```
+pydantic.BaseModel
+    └── BasicReturn          (ok, error)
+            └── DataAndMsgReturn   (ok, error, msg, data)
+```
+
+Every `DataAndMsgReturn` instance **is** a valid `BasicReturn` instance, so
+any code that accepts a `BasicReturn` will also accept a `DataAndMsgReturn`.
+This makes it straightforward to upgrade existing functions — swap the return
+type annotation from `BasicReturn` to `DataAndMsgReturn` and start populating
+`msg` and `data` without changing any caller that only checks `result.ok`.
+
+See the [BasicReturn reference](/api/basic-return) for full documentation of
+the base class and its fields.
+
+<Note>
+  `data` accepts **any Python type** — no serialization step is needed before
+  assigning it. Pass a raw `dict`, a list, a Pydantic model, a dataclass, or
+  even a primitive. Only call `to_dict()` when you are ready to hand the value
+  off to a serialization boundary such as a JSON encoder or an HTTP response
+  helper.
+</Note>
+
+<Tip>
+  Call `to_dict()` at the API boundary to get a JSON-serializable dict that is
+  ready for `json.dumps()` or a framework response helper such as Flask's
+  `jsonify()` or FastAPI's `JSONResponse`:
+
+  ```python
+  import json
+  from BasicReturns import DataAndMsgReturn
+
+  result = DataAndMsgReturn(ok=True, msg="OK", data={"value": 42})
+  payload = json.dumps(result.to_dict())
+  # '{"ok": true, "error": null, "msg": "OK", "data": {"value": 42}}'
+  ```
+</Tip>
